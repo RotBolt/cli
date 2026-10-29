@@ -634,7 +634,7 @@ func runExplainAuto(ctx context.Context, w, errW io.Writer, target string, noPag
 	if commitErr != nil {
 		return fmt.Errorf("failed to get commit %s: %w", abbreviateCommitHash(lookup.repo, hash), commitErr)
 	}
-	cpIDs := explainCheckpointsForCommit(ctx, errW, lookup, commit)
+	cpIDs := trailers.ParseAllCheckpoints(commit.Message)
 	if len(cpIDs) == 0 {
 		// Side-effect modes must error — silently succeeding would leave
 		// scripts unable to distinguish "done" from "didn't happen".
@@ -1658,7 +1658,7 @@ func withLinkedCommits(repo *git.Repository, commits []associatedCommit, links [
 // Searches commits on the current branch for Entire-Checkpoint trailer matches.
 // When searchAll is true, uses full DAG walk with no depth limit (may be slow).
 // This finds checkpoint commits on merged feature branches (second parents of merges).
-func getAssociatedCommits(ctx context.Context, repo *git.Repository, checkpointID id.CheckpointID, searchAll bool, linked ...checkpoint.LinkedCommit) ([]associatedCommit, error) {
+func getAssociatedCommits(ctx context.Context, repo *git.Repository, checkpointID id.CheckpointID, searchAll bool) ([]associatedCommit, error) {
 	head, err := repo.Head()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get HEAD: %w", err)
@@ -1666,7 +1666,7 @@ func getAssociatedCommits(ctx context.Context, repo *git.Repository, checkpointI
 
 	commits := []associatedCommit{} // Initialize as empty slice, not nil (nil means "not searched")
 	matches := func(c *object.Commit) bool {
-		return slices.Contains(trailers.ParseAllCheckpoints(c.Message), checkpointID) || slices.ContainsFunc(linked, func(link checkpoint.LinkedCommit) bool { return plumbing.NewHash(link.SHA).Equal(c.Hash) })
+		return slices.Contains(trailers.ParseAllCheckpoints(c.Message), checkpointID)
 	}
 
 	collectCommit := func(c *object.Commit) {
@@ -2411,10 +2411,8 @@ func getBranchCheckpoints(ctx context.Context, repo *git.Repository, limit int) 
 	isOnDefault, _ := strategy.IsOnDefaultBranch(repo)
 
 	var points []strategy.PendingCheckpoint
-	links := checkpoint.NewCommitLinkIndex(committedInfos)
-
 	collectCheckpoint := func(c *object.Commit) {
-		for _, cpID := range links.Resolve(c.Hash.String(), trailers.ParseAllCheckpoints(c.Message)) {
+		for _, cpID := range trailers.ParseAllCheckpoints(c.Message) {
 			cpInfo, found := committedByID[cpID]
 			if !found {
 				continue
@@ -2749,7 +2747,7 @@ func runExplainCommit(ctx context.Context, w, errW io.Writer, commitRef string, 
 	}
 	cpIDs := trailers.ParseAllCheckpoints(commit.Message)
 	if lookupErr == nil {
-		cpIDs = explainCheckpointsForCommit(ctx, errW, lookup, commit)
+		cpIDs = trailers.ParseAllCheckpoints(commit.Message)
 	}
 	if len(cpIDs) == 0 {
 		// Side-effect modes must error so scripts can distinguish "done"
@@ -2765,17 +2763,6 @@ func runExplainCommit(ctx context.Context, w, errW io.Writer, commitRef string, 
 		return runExplainCheckpoint(ctx, w, errW, cpIDs[0].String(), noPager, verbose, full, rawTranscript, generate, force, searchAll, summaryTimeoutSeconds)
 	}
 	return explainCommitCheckpoints(ctx, w, errW, lookup, hash, cpIDs, noPager, verbose, full, rawTranscript, generate, force, searchAll, summaryTimeoutSeconds)
-}
-
-func explainCheckpointsForCommit(ctx context.Context, errW io.Writer, lookup *explainCheckpointLookup, commit *object.Commit) []id.CheckpointID {
-	ids := trailers.ParseAllCheckpoints(commit.Message)
-	for _, cpID := range checkpoint.CheckpointsLinkedToWithStubs(ctx, lookup.store, lookup.committed, commit.Hash.String(), commit.Committer.When) {
-		if !slices.Contains(ids, cpID) {
-			ids = append(ids, cpID)
-			fmt.Fprintf(errW, "Note: checkpoint %s names commit %s in a recorded link. The CLI can't verify who recorded the link: anyone who can push checkpoints can name any commit.\n", cpID, abbreviateCommitHash(lookup.repo, commit.Hash))
-		}
-	}
-	return ids
 }
 
 func explainCommitCheckpoints(ctx context.Context, w, errW io.Writer, lookup *explainCheckpointLookup, hash plumbing.Hash, ids []id.CheckpointID, noPager, verbose, full, rawTranscript, generate, force, searchAll bool, summaryTimeoutSeconds int) error {

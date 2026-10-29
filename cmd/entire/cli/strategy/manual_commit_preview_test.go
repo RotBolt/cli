@@ -44,7 +44,7 @@ func TestPreviewNextCheckpoint(t *testing.T) {
 	worktree, err := paths.WorktreeRoot(ctx)
 	require.NoError(t, err)
 
-	newer := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	newer := time.Now().UTC().Truncate(time.Second)
 	older := newer.Add(-time.Hour)
 	save := func(state *SessionState) {
 		t.Helper()

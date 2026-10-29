@@ -23,8 +23,8 @@ func (r *linkedSummaryReader) Read(_ context.Context, cid id.CheckpointID) (*Che
 	return nil, errors.New("not found")
 }
 
-// Stubs minted around or after the commit are read for their links; older ones
-// predate the commit and are never read.
+// Checkpoints can predate the commit they link after an amend or rebase.
+// Discovery must read older stubs too, within the shared hydration budget.
 func TestCheckpointsLinkedToWithStubs(t *testing.T) {
 	t.Parallel()
 	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -46,9 +46,9 @@ func TestCheckpointsLinkedToWithStubs(t *testing.T) {
 		{CheckpointID: unreadable, ListedStub: true, CreatedAt: committedAt.Add(time.Hour)},
 	}
 
-	got := CheckpointsLinkedToWithStubs(context.Background(), reader, infos, sha, committedAt)
-	assert.Equal(t, []id.CheckpointID{local, newStub}, got)
-	assert.Equal(t, []id.CheckpointID{newStub, unreadable}, reader.reads)
+	got := CheckpointsLinkedToWithStubs(context.Background(), reader, infos, sha)
+	assert.Equal(t, []id.CheckpointID{local, newStub, oldStub}, got)
+	assert.Equal(t, []id.CheckpointID{newStub, oldStub, unreadable}, reader.reads)
 }
 
 // A checkpoint dated in the future is ignored: its ID is the pusher's choice,
@@ -65,7 +65,7 @@ func TestCheckpointsLinkedToWithStubs_IgnoresFutureDatedCheckpoints(t *testing.T
 		{CheckpointID: stub, ListedStub: true, CreatedAt: time.Now().Add(30 * 24 * time.Hour)},
 	}
 
-	got := CheckpointsLinkedToWithStubs(context.Background(), reader, infos, sha, time.Now())
+	got := CheckpointsLinkedToWithStubs(context.Background(), reader, infos, sha)
 	assert.Empty(t, got)
 	assert.Empty(t, reader.reads)
 }

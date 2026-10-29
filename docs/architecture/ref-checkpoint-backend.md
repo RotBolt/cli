@@ -185,7 +185,7 @@ A checkpoint written on another machine has no local ref. When a read — or a b
 
 To close that gap `List` supports **opt-in remote discovery**:
 
-- The caller marks the context with `WithRemoteListDiscovery` (set only on explicit, user-facing enumeration — `entire checkpoint list` and the branch `explain` view — never the per-turn commit hook, so routine local listings stay network-free).
+- The caller marks the context with `WithRemoteListDiscovery` (set only on explicit, user-facing enumeration — `entire checkpoint list` and the branch `explain` view — never commit-SHA lookup or the per-turn commit hook, so routine local listings stay network-free).
 - A **remote ref lister** injected by the CLI runs `git ls-remote refs/entire/checkpoints/*` — **names only, no object transfer** — against the checkpoint remote(s) (see the scoping below).
 - Each advertised ref that has no local ref yet is added to the result as a not-yet-hydrated `CheckpointInfo`. Its `CreatedAt` is recovered from the ULID timestamp in the ref name, so it sorts by real recency without a fetch; the rest of its contents are **hydrated lazily on the next read** via the on-demand ref fetch (and, on the branch `explain` / `checkpoint list` path, eagerly for the truncated display set so `--session` filters see real SessionIDs).
 
@@ -203,11 +203,11 @@ To close that gap `List` supports **opt-in remote discovery**:
 | **hex**, git-branch primary | branch only | branch is authoritative for hex |
 | **hex**, git-refs primary | refs first, then git-branch fallback | a hex checkpoint may still sit on the pre-migration v1 branch, or have been migrated into refs |
 
-- `List` **unions both** backends and de-dups by ID (the same checkpoint can appear in both during coexistence), keeping the most recent.
+- `List` **unions both** backends and de-dups by ID (the same checkpoint can appear in both during coexistence), keeping the most recent session fields and unioning `LinkedCommits` from every copy. A link backfill does not change session creation time, so a stale copy must not hide associations written into the other backend.
 - The `firstResolved` helper tries stores in priority order; a non-final store that reports absent *or* errors falls through to the next, so a transient git-refs fetch error cannot hide a checkpoint that resolves on the branch. The final store's result (hit, absent, or error) is returned verbatim.
 - The optional `AuthorReader` capability (`explain` relies on it) is preserved and routed by the same rules when both read stores provide it.
 - **Creates (`Session`) are not kind-routed.** They target the configured primary (+ mirrors); the minted ID already matches the primary's format.
-- **Backfills (`SessionSummary`, `SessionTranscript`) are kind-routed.** They update an *existing* checkpoint, which may live in either backend, so they follow the read order above, falling through to the next store only on `ErrCheckpointNotFound` (stricter than reads — a hard error aborts rather than risking a forked write). A backfill landing on the primary still fans out to mirrors; one landing on a fallback store skips mirrors (mirrors follow the primary) and logs the routing decision.
+- **Backfills (`SessionSummary`, `SessionTranscript`, `CheckpointCommitLinks`) are kind-routed.** They update an *existing* checkpoint, which may live in either backend, so they follow the read order above, falling through to the next store only on `ErrCheckpointNotFound` (stricter than reads — a hard error aborts rather than risking a forked write). A backfill landing on the primary still fans out to mirrors; one landing on a fallback store skips mirrors (mirrors follow the primary) and logs the routing decision.
 
 All general read paths — resume, explain, blame, why, tokens, attach — inherit this routing for free through `checkpoint.Open`; there is no per-command config knob.
 

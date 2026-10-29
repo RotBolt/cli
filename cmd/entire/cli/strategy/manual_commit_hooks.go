@@ -246,12 +246,6 @@ func (s *ManualCommitStrategy) PostRewrite(ctx context.Context, rewriteType stri
 	}
 	defer repo.Close()
 
-	if rewriteType == "amend" {
-		if err := s.linkAmendedCheckpoints(ctx, repo, rewrites); err != nil {
-			logging.Warn(logCtx, "post-rewrite: checkpoint linkage repair failed", slog.String("error", err.Error()))
-		}
-	}
-
 	sessions, err := s.findSessionsForWorktree(ctx, worktreePath)
 	if err != nil {
 		return nil

@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,35 +147,6 @@ type attributionResolver struct {
 
 	commitCache     map[string]*object.Commit
 	checkpointCache map[string]attributionCheckpointContext
-	// linked lists checkpoints once, for commits linked without a trailer
-	// (`entire session attach --commit`). nil until first needed.
-	linked []checkpoint.CheckpointInfo
-	// linkedByCommit caches linkedCheckpoints per commit, since reading a
-	// remote-discovered stub for its links can fetch.
-	linkedByCommit map[string][]id.CheckpointID
-	// linkedStubs reads each remote-discovered stub at most once per run, and
-	// linkedDeadline gives every such read in the run one shared budget.
-	linkedStubs    *stubSummaryCache
-	linkedDeadline time.Time
-}
-
-// stubSummaryCache remembers each checkpoint summary it reads, failures
-// included, so a blame run reads a stub at most once.
-type stubSummaryCache struct {
-	reader    attributionCheckpointReader
-	summaries map[id.CheckpointID]*checkpoint.CheckpointSummary
-}
-
-func (c *stubSummaryCache) Read(ctx context.Context, cpID id.CheckpointID) (*checkpoint.CheckpointSummary, error) {
-	if summary, ok := c.summaries[cpID]; ok {
-		return summary, nil
-	}
-	summary, err := c.reader.Read(ctx, cpID)
-	if err != nil {
-		summary = nil
-	}
-	c.summaries[cpID] = summary
-	return summary, err //nolint:wrapcheck // callers treat a failed read as no links
 }
 
 func newBlameCmd() *cobra.Command {
@@ -397,7 +367,12 @@ func newAttributionResolver(ctx context.Context, fetchOnMiss bool) (*attribution
 		return nil, fmt.Errorf("not a git repository: %w", err)
 	}
 
-	stores, err := checkpoint.Open(ctx, repo, checkpoint.OpenOptions{BlobFetcher: FetchBlobsByHash, RefFetcher: FetchCheckpointRef, ReadRemotes: strategy.CheckpointReadRemotes(ctx)})
+	stores, err := checkpoint.Open(ctx, repo, checkpoint.OpenOptions{
+		BlobFetcher:     FetchBlobsByHash,
+		RefFetcher:      FetchCheckpointRef,
+		RemoteRefLister: ListCheckpointRefsOnRemote,
+		ReadRemotes:     strategy.CheckpointReadRemotes(ctx),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open checkpoint store: %w", err)
 	}
@@ -416,16 +391,6 @@ func (r *attributionResolver) Close() {
 	if r != nil && r.repo != nil {
 		_ = r.repo.Close()
 	}
-}
-
-func (r *attributionResolver) checkpointsForCommit(commit *object.Commit) []id.CheckpointID {
-	ids := trailers.ParseAllCheckpoints(commit.Message)
-	for _, cpID := range r.linkedCheckpoints(commit) {
-		if !slices.Contains(ids, cpID) {
-			ids = append(ids, cpID)
-		}
-	}
-	return ids
 }
 
 func (r *attributionResolver) resolveLine(raw rawBlameLine, file string) attributionLine {
@@ -451,8 +416,7 @@ func (r *attributionResolver) resolveLine(raw rawBlameLine, file string) attribu
 		return line
 	}
 
-	cpIDs := r.checkpointsForCommit(commit)
-	line.RecordedLink = len(r.linkedCheckpoints(commit)) > 0
+	cpIDs := trailers.ParseAllCheckpoints(commit.Message)
 	if len(cpIDs) == 0 {
 		return line
 	}
@@ -478,36 +442,6 @@ func (r *attributionResolver) commit(sha string) (*object.Commit, error) {
 	}
 	r.commitCache[sha] = commit
 	return commit, nil
-}
-
-// linkedCheckpoints returns the checkpoints that link commit without a
-// trailer. The store is listed once per blame run; a store that cannot list
-// contributes none.
-func (r *attributionResolver) linkedCheckpoints(commit *object.Commit) []id.CheckpointID {
-	sha := commit.Hash.String()
-	if ids, ok := r.linkedByCommit[sha]; ok {
-		return ids
-	}
-	if r.linked == nil {
-		r.linked = []checkpoint.CheckpointInfo{}
-		r.linkedStubs = &stubSummaryCache{reader: r.store, summaries: make(map[id.CheckpointID]*checkpoint.CheckpointSummary)}
-		r.linkedDeadline = time.Now().Add(checkpoint.ListHydrationPassTimeout)
-		if lister, ok := r.store.(interface {
-			List(ctx context.Context) ([]checkpoint.CheckpointInfo, error)
-		}); ok {
-			if infos, err := lister.List(r.ctx); err == nil {
-				r.linked = infos
-			}
-		}
-	}
-	ctx, cancel := context.WithDeadline(r.ctx, r.linkedDeadline)
-	ids := checkpoint.CheckpointsLinkedToWithStubs(ctx, r.linkedStubs, r.linked, sha, commit.Committer.When)
-	cancel()
-	if r.linkedByCommit == nil {
-		r.linkedByCommit = make(map[string][]id.CheckpointID)
-	}
-	r.linkedByCommit[sha] = ids
-	return ids
 }
 
 func (r *attributionResolver) checkpointContext(cpID id.CheckpointID, file string) attributionCheckpointContext {

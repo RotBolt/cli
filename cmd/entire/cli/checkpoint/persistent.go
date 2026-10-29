@@ -1608,7 +1608,6 @@ func readCommittedInfoFromCheckpointTree(checkpointID id.CheckpointID, checkpoin
 	info.FilesTouched = summary.FilesTouched
 	info.SessionCount = len(summary.Sessions)
 	info.Imported = summary.Imported
-	info.LinkedCommits = summary.LinkedCommits
 
 	for i := range summary.Sessions {
 		sessionMetadata, ok := readCommittedMetadataFromCheckpointTree(checkpointTree, i)
@@ -2940,22 +2939,19 @@ func CheckpointsLinkedTo(infos []CheckpointInfo, commitSHA string) []id.Checkpoi
 	return ids
 }
 
-// linkedStubSkew is how far before a commit a checkpoint linking it may claim
-// to have been minted, allowing for clock skew between machines.
+// linkedStubSkew allows clock skew when rejecting future-dated checkpoints.
 const linkedStubSkew = 24 * time.Hour
 
 // CheckpointsLinkedToWithStubs is CheckpointsLinkedTo for a listing that may
 // hold names-only stubs (git-refs checkpoints discovered on a remote), whose
-// links are unknown until read. A stub minted no earlier than committedAt
-// (less linkedStubSkew) is read for its links; an older one predates the commit
-// and can't link it. Reads share ListHydrationPassTimeout, and a stub that
-// can't be read links nothing.
+// links are unknown until read. Even an old checkpoint can link a newer commit
+// after an amend or rebase, so creation time cannot exclude it. Reads share
+// ListHydrationPassTimeout, and a stub that can't be read links nothing.
 func CheckpointsLinkedToWithStubs(ctx context.Context, reader interface {
 	Read(ctx context.Context, checkpointID id.CheckpointID) (*CheckpointSummary, error)
-}, infos []CheckpointInfo, commitSHA string, committedAt time.Time) []id.CheckpointID {
+}, infos []CheckpointInfo, commitSHA string) []id.CheckpointID {
 	passCtx, cancel := context.WithTimeout(ctx, ListHydrationPassTimeout)
 	defer cancel()
-	since := committedAt.Add(-linkedStubSkew)
 	// A checkpoint ID dated in the future can't be a real attach; its ID is
 	// chosen by whoever pushed it, and as "most recent" it would always win.
 	latest := time.Now().Add(linkedStubSkew)
@@ -2965,7 +2961,7 @@ func CheckpointsLinkedToWithStubs(ctx context.Context, reader interface {
 			continue
 		}
 		links := info.LinkedCommits
-		if info.ListedStub && !info.CreatedAt.Before(since) && passCtx.Err() == nil {
+		if info.ListedStub && passCtx.Err() == nil {
 			readCtx, readCancel := context.WithTimeout(passCtx, ListHydrationTimeout)
 			if summary, err := reader.Read(readCtx, info.CheckpointID); err == nil && summary != nil {
 				links = summary.LinkedCommits

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/stretchr/testify/assert"
@@ -294,6 +295,55 @@ func TestKindRoutingStore_ListDedupesAcrossBackends(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, count, "a checkpoint present in both backends should appear once")
+}
+
+func TestKindRoutingStore_ListPreservesLinksFromBothCopies(t *testing.T) {
+	t.Parallel()
+	for _, primary := range []string{BackendTypeGitBranch, BackendTypeGitRefs} {
+		t.Run(primary, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			_, repo, _ := newTestRepo(t)
+			branch := NewGitStore(repo, DefaultV1Refs())
+			refs := newGitRefsStore(repo)
+			cid := id.MustCheckpointID("a1b2c3d4e5f6")
+			oldLink := LinkedCommit{SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+			newLink := LinkedCommit{SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+			now := time.Now()
+			// Make the branch copy strictly newer. Repairing the refs copy
+			// does not change CreatedAt, so recency must not discard its link.
+			for _, target := range []struct {
+				store   PersistentStore
+				created time.Time
+			}{{branch, now}, {refs, now.Add(-time.Hour)}} {
+				require.NoError(t, target.store.Write(ctx, Session{
+					CheckpointID: cid, SessionID: "same-session", CreatedAt: target.created,
+					Transcript: redact.AlreadyRedacted([]byte("original")), LinkedCommits: []LinkedCommit{oldLink},
+					AuthorName: "Test", AuthorEmail: "test@example.com",
+				}))
+			}
+			writer := PersistentStore(branch)
+			if primary == BackendTypeGitRefs {
+				writer = refs
+			}
+			router := newKindRoutingStore(writer, branch, refs, primary)
+			require.NoError(t, router.Write(ctx, CheckpointCommitLinks{CheckpointID: cid, Links: []LinkedCommit{newLink}}))
+			for range 2 {
+				infos, err := router.List(ctx)
+				require.NoError(t, err)
+				require.Len(t, infos, 1)
+				assert.ElementsMatch(t, []LinkedCommit{oldLink, newLink}, infos[0].LinkedCommits)
+				assert.Equal(t, []id.CheckpointID{cid}, CheckpointsForCommit(infos, newLink.SHA, nil), "later rewrites and readers must see the repair")
+			}
+			// Distinct associations on a stale mirror must survive too.
+			otherLink := LinkedCommit{SHA: "cccccccccccccccccccccccccccccccccccccccc"}
+			require.NoError(t, refs.Write(ctx, CheckpointCommitLinks{CheckpointID: cid, Links: []LinkedCommit{otherLink}}))
+			infos, err := router.List(ctx)
+			require.NoError(t, err)
+			require.Len(t, infos, 1)
+			assert.ElementsMatch(t, []LinkedCommit{oldLink, newLink, otherLink}, infos[0].LinkedCommits)
+		})
+	}
 }
 
 func TestKindRoutingStore_SummaryBackfillFallsBackToBranch(t *testing.T) {

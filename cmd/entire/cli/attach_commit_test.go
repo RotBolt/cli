@@ -8,11 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	cpkg "github.com/entireio/cli/cmd/entire/cli/checkpoint"
-	checkpointid "github.com/entireio/cli/cmd/entire/cli/checkpoint/id"
 	"github.com/entireio/cli/cmd/entire/cli/interactive"
 	"github.com/entireio/cli/cmd/entire/cli/session"
 	"github.com/entireio/cli/cmd/entire/cli/testutil"
@@ -355,42 +353,6 @@ func TestAttachCommit_RejectsWhatIsNotACommit(t *testing.T) {
 	}
 }
 
-// explain <commit> finds a checkpoint linked without a trailer.
-func TestAttachCommit_ExplainFindsTheLinkedCheckpoint(t *testing.T) {
-	setupAttachTestRepo(t)
-	target := commitAt(t, "work.txt")
-	commitAt(t, "later.txt")
-	pushToOrigin(t)
-	sessionID := "attach-commit-explain"
-	if out, err := attachHeadless(t, sessionID, attachOptions{Commit: target.Hash.String()}); err != nil {
-		t.Fatalf("runAttach: %v\n%s", err, out)
-	}
-	state, err := loadAttachState(t, sessionID)
-	if err != nil || state == nil {
-		t.Fatalf("load state: %v, %v", state, err)
-	}
-
-	var explainOut, explainErr bytes.Buffer
-	if err := runExplainAuto(context.Background(), &explainOut, &explainErr, target.Hash.String(), true, false, false, false, false, false, false, 0); err != nil {
-		t.Fatalf("explain: %v\n%s", err, explainErr.String())
-	}
-	got := explainOut.String()
-	if strings.Contains(got, "no Entire-Checkpoint trailer") || !strings.Contains(got, state.LastCheckpointID.String()) {
-		t.Fatalf("explain did not resolve the linked checkpoint %s:\n%s", state.LastCheckpointID, got)
-	}
-	// The linked commit has no trailer, but the checkpoint lists it.
-	if strings.Contains(got, "(none on this branch)") || !strings.Contains(got, target.Hash.String()[:7]) {
-		t.Errorf("explain should list the linked commit %s:\n%s", target.Hash.String()[:7], got)
-	}
-	// A recorded link can't be verified locally, so it is labelled as one.
-	if !strings.Contains(got, "(recorded link, unverified)") {
-		t.Errorf("the linked commit should be labelled as an unverified recorded link:\n%s", got)
-	}
-	if !strings.Contains(explainErr.String(), "can't verify who recorded the link") {
-		t.Errorf("explain <commit> should note the link is unverified:\n%s", explainErr.String())
-	}
-}
-
 func TestCheckpointsLinkedTo(t *testing.T) {
 	t.Parallel()
 	a, b := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -405,76 +367,6 @@ func TestCheckpointsLinkedTo(t *testing.T) {
 	}
 	if got := cpkg.CheckpointsLinkedTo(infos, "cccccccccccccccccccccccccccccccccccccccc"); len(got) != 0 {
 		t.Fatalf("CheckpointsLinkedTo(unlinked) = %v", got)
-	}
-}
-
-type listingAttributionStub struct {
-	attributionCheckpointReaderStub
-
-	infos   []cpkg.CheckpointInfo
-	listErr error
-	lists   int
-}
-
-func (s *listingAttributionStub) List(context.Context) ([]cpkg.CheckpointInfo, error) {
-	s.lists++
-	return s.infos, s.listErr
-}
-
-// blame/why treat a commit linked by attach --commit like a trailer-linked one,
-// listing the store once per run.
-func TestAttributionResolver_LinkedCheckpoints(t *testing.T) {
-	t.Parallel()
-	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	store := &listingAttributionStub{infos: []cpkg.CheckpointInfo{
-		{CheckpointID: "111111111111", LinkedCommits: []cpkg.LinkedCommit{{SHA: sha}}},
-	}}
-	commit := &object.Commit{Hash: plumbing.NewHash(sha)}
-	r := &attributionResolver{ctx: context.Background(), store: store}
-	for range 2 {
-		if got := r.linkedCheckpoints(commit); len(got) != 1 || got[0] != "111111111111" {
-			t.Fatalf("linkedCheckpoints = %v", got)
-		}
-	}
-	if store.lists != 1 {
-		t.Fatalf("store listed %d times, want once per run", store.lists)
-	}
-
-	plain := &attributionResolver{ctx: context.Background(), store: &attributionCheckpointReaderStub{}}
-	if got := plain.linkedCheckpoints(commit); len(got) != 0 {
-		t.Fatalf("a store that cannot list links nothing, got %v", got)
-	}
-	failing := &attributionResolver{ctx: context.Background(), store: &listingAttributionStub{listErr: context.Canceled}}
-	if got := failing.linkedCheckpoints(commit); len(got) != 0 {
-		t.Fatalf("a failed listing links nothing, got %v", got)
-	}
-}
-
-type countingStubReader struct {
-	listingAttributionStub
-
-	reads int
-}
-
-func (s *countingStubReader) Read(context.Context, checkpointid.CheckpointID) (*cpkg.CheckpointSummary, error) {
-	s.reads++
-	return &cpkg.CheckpointSummary{}, nil
-}
-
-// Blame reads a remote-discovered stub for its links once per run, not once per
-// trailer-less commit.
-func TestAttributionResolver_ReadsEachStubOncePerRun(t *testing.T) {
-	t.Parallel()
-	now := time.Now()
-	store := &countingStubReader{listingAttributionStub: listingAttributionStub{infos: []cpkg.CheckpointInfo{
-		{CheckpointID: "111111111111", ListedStub: true, CreatedAt: now},
-	}}}
-	r := &attributionResolver{ctx: context.Background(), store: store}
-	for _, sha := range []string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"} {
-		r.linkedCheckpoints(&object.Commit{Hash: plumbing.NewHash(sha), Committer: object.Signature{When: now}})
-	}
-	if store.reads != 1 {
-		t.Fatalf("stub read %d times, want once per run", store.reads)
 	}
 }
 

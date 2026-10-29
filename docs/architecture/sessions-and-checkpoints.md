@@ -245,20 +245,25 @@ squash, and are recorded so post-commit never condenses into one.
 
 **Amends with replacement messages** (`git commit --amend -m` / `-F`) report
 source `message` to prepare-commit-msg, indistinguishable from ordinary commits.
-After Git completes the amend, `post-rewrite amend` supplies the old/new SHA pair.
-The hook adds checkpoint-side `linked_commits: [{sha, repo}]` associations for
-checkpoints named by the replaced commit but missing from the new commit's
-trailers. Git's trailer parser excludes checkpoint-shaped lines in subjects or
-bodies. Links from earlier amends also follow the rewrite, so repeated message
-replacement does not lose them. The hook never rewrites the code commit,
+Git's `prepare-commit-msg` source is a reliable amend signal only for source
+`commit`; in that case the hook preserves or restores the existing checkpoint
+trailer. For `git commit --amend -m/-F`, Git reports source `message`, which is
+indistinguishable from a normal message-based commit. This contract does not
+infer an amend after the fact or create checkpoint-side reverse associations.
+If a replacement-message amend loses its trailer, use the stable checkpoint ID
+with `entire checkpoint explain --checkpoint <id>`; `entire checkpoint list`
+provides the IDs. The stored checkpoint and transcript remain unchanged. The hook never rewrites the code commit,
 re-condenses old session data, or creates a missing checkpoint. `repo` is an
 optional forge-qualified repository hint, resolved from the elected sync remote.
 
-These links are attributing associations, unlike import's `commit_sha` anchor.
-CLI explain/list and blame/why union them with trailers: an amend with fresh
-agent work can carry a new checkpoint trailer and retain links to earlier
-checkpoints at the same time. Root-summary updates preserve the links across
-session, transcript, summary, and attribution writes. Hosted visibility requires
+These links are attributing associations for explicit session attach, unlike
+import's `commit_sha` anchor. An attach-created link does not make arbitrary
+trailerless commit lookups discoverable: normal commit explain and blame/why
+resolve from trailers. Use the checkpoint ID to inspect a checkpoint when a
+replacement-message amend removed its trailer. Root-summary updates preserve
+attach links across session, transcript, and summary writes. When both git
+backends hold a checkpoint, listing unions their commit links so a stale mirror
+cannot hide an attach link. Hosted visibility requires
 server support for the field and verification of the association; writing it
 alone does not make an older server recognize the amended commit. Older CLIs
 may drop the field when rewriting root metadata.
@@ -746,20 +751,18 @@ A recorded link is `linked_commits` on the root `CheckpointSummary`: a list of
 holds the commit, possibly empty). Unlike the import anchor below it is an
 **attributing** link: the server credits a verified entry as it would a
 trailer. The CLI can't verify who recorded a link (anyone who can push checkpoints
-can name any commit), so `explain` and `blame`/`why` label commits and lines
-found through one as unverified recorded links, and lookups ignore checkpoints
-dated in the future. Unlike a trailer it names one exact commit, so it does not follow a
-later rebase or amend of that commit; attach says so, and the remedy is to
-attach the session to the new commit. The server
+can name any commit), so attach labels a link as unverified. Commit explain and
+blame/why do not search these links. A link names one exact commit. Entire's `post-rewrite`
+hook does not carry associations through amends or rebases. Commit explain and
+blame/why resolve from trailers, not reverse metadata lookup; use checkpoint ID
+to inspect a checkpoint when a rewrite removes its trailer. Attach is the
+explicit workflow for creating a recorded link to a commit. The server
 verifies it only when the authenticated checkpoint pusher is the commit's
 author (otherwise it is stored as an unverified attachment; attach warns when
 the local git author differs). Rewrites of the checkpoint keep existing entries
-(`unionLinkedCommits`). Readers consult trailers first and fall back to
-`checkpoint.CheckpointsLinkedToWithStubs` (`explain <commit>`, `blame`/`why`,
-and attach itself), which also reads git-refs stubs discovered on a remote
-that were minted no earlier than a day before the commit. Attach
-pushes the checkpoint itself through the pre-push path, since no later push may
-carry it, and confirms the remote's ref now matches before reporting success:
+(`unionLinkedCommits`). Attach searches `checkpoint.CheckpointsLinkedToWithStubs`
+to find prior explicit attachments. It pushes the checkpoint itself through the
+pre-push path, since no later push may carry it, and confirms the remote's ref now matches before reporting success:
 for a pushed commit the checkpoint is the only record of the link, so a skipped
 or rejected push (push_sessions off, remote gating) is an error. A second
 attach to a linked commit finds the checkpoint through every copy, fetches it

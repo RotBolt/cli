@@ -123,14 +123,17 @@ func (s *kindRoutingStore) List(ctx context.Context) ([]CheckpointInfo, error) {
 	// Dedup by ID: during coexistence/migration the same checkpoint can appear in
 	// both backends (a ULID mirrored to the branch, or a hex still on the branch
 	// and also migrated into refs). Keep the first occurrence — i.e. the most
-	// recent after the sort.
+	// recent after the sort. Union commit links: backfills can update only
+	// one copy without changing its session creation time, so choosing a
+	// single copy by recency would hide successful linkage repairs.
 	deduped := merged[:0]
-	seen := make(map[id.CheckpointID]struct{}, len(merged))
+	seen := make(map[id.CheckpointID]int, len(merged))
 	for _, info := range merged {
-		if _, dup := seen[info.CheckpointID]; dup {
+		if index, dup := seen[info.CheckpointID]; dup {
+			deduped[index].LinkedCommits = unionLinkedCommits(deduped[index].LinkedCommits, info.LinkedCommits)
 			continue
 		}
-		seen[info.CheckpointID] = struct{}{}
+		seen[info.CheckpointID] = len(deduped)
 		deduped = append(deduped, info)
 	}
 	return deduped, nil

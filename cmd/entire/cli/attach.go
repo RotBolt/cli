@@ -107,8 +107,9 @@ already have a checkpoint, and is it pushed — the same for HEAD and --commit:
     not changed.
   - It is already pushed: the commit is left unchanged and the link is
     recorded in a new checkpoint, which is pushed right away. The link counts
-    once the commit's author attaches it, and names that exact commit: after
-    a rebase or amend, attach the session to the new commit.
+    once the commit's author attaches it, and names that exact commit. If it
+    is later amended or rebased,
+    use the checkpoint ID to inspect its checkpoint.
   - It isn't pushed: the Entire-Checkpoint trailer is added to it, which
     rewrites it and any commits after it on the current branch (their content
     is unchanged). A trailer survives a later rebase. Merges after the commit,
@@ -553,7 +554,7 @@ func attachWarning(ctx context.Context, plan attachLinkPlan, sessionID string, c
 	case plan.mode == attachRecordLink:
 		lines = append(lines,
 			fmt.Sprintf("Commit %s is already pushed to %s, so it won't be changed.", describeCommit(target), plan.holder),
-			fmt.Sprintf("A new checkpoint with session %s records a link to it instead. The link names this exact commit: if the commit is later rebased or amended, attach the session to the new one.", sessionID))
+			fmt.Sprintf("A new checkpoint with session %s records a link to it instead. The link names this exact commit; if it is later amended or rebased, use the checkpoint ID to inspect its checkpoint.", sessionID))
 		if author, err := GetGitAuthor(ctx); err == nil && !strings.EqualFold(author.Email, target.Author.Email) {
 			lines = append(lines, fmt.Sprintf("The commit was authored by %s. A recorded link counts only when the commit's author attaches it.", target.Author.Email))
 		}
@@ -627,7 +628,7 @@ const (
 	attachJoinExisting attachLinkMode = iota
 	// attachAddTrailer: no remote branch holds the commit. The trailer is
 	// added, rewriting the commit and any after it: nobody else has them, and
-	// a trailer survives a later rebase, where a recorded link wouldn't.
+	// a trailer survives a later rebase without a reverse-link lookup.
 	attachAddTrailer
 	// attachRecordLink: a remote branch already holds the commit, so rewriting
 	// it would mean a force-push. The link is recorded in the checkpoint
@@ -719,7 +720,7 @@ func checkpointLinkedTo(ctx context.Context, store cpkg.PersistentStore, target 
 		logging.Debug(ctx, "attach: listing checkpoints for a recorded link failed", slog.String("error", err.Error()))
 		return id.EmptyCheckpointID, false
 	}
-	linked := cpkg.CheckpointsLinkedToWithStubs(ctx, store, infos, target.Hash.String(), target.Committer.When)
+	linked := cpkg.CheckpointsLinkedToWithStubs(ctx, store, infos, target.Hash.String())
 	if len(linked) == 0 {
 		return id.EmptyCheckpointID, false
 	}
@@ -972,9 +973,9 @@ func trackingRefRemote(ref string, remotes []string) string {
 // pushes the checkpoint.
 func reportLinkedCommit(ctx context.Context, w, errW io.Writer, plan attachLinkPlan, checkpointID id.CheckpointID) error {
 	fmt.Fprintf(w, "  Linked to commit %s in the checkpoint; the commit is unchanged (already pushed)\n", plan.target.Hash.String()[:12])
-	// Finding 4 (rebase): a recorded link names this exact commit and does not
-	// follow it through a later rebase or amend, unlike a trailer.
-	fmt.Fprintf(errW, "Note: this link names commit %s. If the commit is later rebased or amended, attach the session to the new commit.\n", plan.target.Hash.String()[:12])
+	// Recorded links name this exact commit; checkpoint-ID lookup remains the
+	// recovery path if later history rewriting removes the association.
+	fmt.Fprintf(errW, "Note: this link names commit %s. If the commit is later amended or rebased, use the checkpoint ID to inspect its checkpoint.\n", plan.target.Hash.String()[:12])
 	if author, err := GetGitAuthor(ctx); err == nil && !strings.EqualFold(author.Email, plan.target.Author.Email) {
 		fmt.Fprintf(errW, "Note: commit %s was authored by %s. A link recorded in the checkpoint counts only when the commit's author attaches it.\n",
 			plan.target.Hash.String()[:12], plan.target.Author.Email)
