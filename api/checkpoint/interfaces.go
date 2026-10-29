@@ -59,7 +59,7 @@ type PersistentStore interface {
 // mirror/fan-out store forwards the same value to each backend's Write.
 //
 // Four requests are session-level (Session, ReservedSession, SessionTranscript,
-// SessionSummary); attribution and commit links are checkpoint-level. Adding
+// SessionSummary); commit links are checkpoint-level. Adding
 // a write operation is a new request type plus one dispatch case in every
 // backend. The Store interface stays unchanged, so seam tests must exercise the
 // full union because Go does not exhaustively check type switches.
@@ -87,15 +87,6 @@ type SessionSummary struct {
 	Summary      *Summary
 }
 
-// CheckpointAttribution rewrites the checkpoint root's combined attribution
-// across all sessions. (checkpoint-level)
-//
-//nolint:revive // CheckpointAttribution stutter is accepted — the name makes the checkpoint (vs session) tier explicit.
-type CheckpointAttribution struct {
-	CheckpointID id.CheckpointID
-	Attribution  *Attribution
-}
-
 // CheckpointCommitLinks adds immutable commit associations to an existing
 // checkpoint. It never creates a checkpoint or replaces session content.
 //
@@ -107,11 +98,10 @@ type CheckpointCommitLinks struct {
 
 func (CheckpointCommitLinks) isWriteRequest() {}
 
-func (Session) isWriteRequest()               {}
-func (ReservedSession) isWriteRequest()       {}
-func (SessionTranscript) isWriteRequest()     {}
-func (SessionSummary) isWriteRequest()        {}
-func (CheckpointAttribution) isWriteRequest() {}
+func (Session) isWriteRequest()           {}
+func (ReservedSession) isWriteRequest()   {}
+func (SessionTranscript) isWriteRequest() {}
+func (SessionSummary) isWriteRequest()    {}
 
 // Writer is the persistent-store write surface: a single Write that accepts any
 // WriteRequest. It is the natural type for mirror fan-out.

@@ -128,8 +128,6 @@ func (s *Store) Write(_ context.Context, req cp.WriteRequest) error {
 		return s.backfillTranscript(cp.UpdateOptions(r))
 	case cp.SessionSummary:
 		return s.writeSessionSummary(r)
-	case cp.CheckpointAttribution:
-		return s.writeAttribution(r)
 	case cp.CheckpointCommitLinks:
 		return s.writeCommitLinks(r)
 	default:
@@ -158,11 +156,6 @@ func (s *Store) writeSession(opts cp.WriteOptions) error {
 	// Summary-level flags accumulate across sessions and survive recompute.
 	sc.Summary.HasReview = sc.Summary.HasReview || opts.HasReview
 	sc.Summary.HasInvestigation = sc.Summary.HasInvestigation || opts.HasInvestigation
-	if opts.CombinedAttribution != nil {
-		// Migration path: an initial write may carry holistic attribution. Normal
-		// condensation sets this later via a CheckpointAttribution write instead.
-		sc.Summary.CombinedAttribution = opts.CombinedAttribution
-	}
 
 	recomputeSummary(sc)
 	return s.save(sc)
@@ -215,18 +208,6 @@ func (s *Store) writeCommitLinks(r cp.CheckpointCommitLinks) error {
 		return fmt.Errorf("fsstore: merge commit links: %w", err)
 	}
 	sc.Summary.LinkedCommits = links
-	return s.save(sc)
-}
-
-func (s *Store) writeAttribution(r cp.CheckpointAttribution) error {
-	sc, err := s.load(r.CheckpointID)
-	if err != nil {
-		return err
-	}
-	if sc == nil {
-		return fmt.Errorf("fsstore: cannot set attribution for unknown checkpoint %s", r.CheckpointID)
-	}
-	sc.Summary.CombinedAttribution = r.Attribution
 	return s.save(sc)
 }
 
@@ -446,10 +427,8 @@ func metadataFromWriteOptions(opts cp.WriteOptions) cp.Metadata {
 		TranscriptLinesAtStart:      opts.CheckpointTranscriptStart, //nolint:staticcheck // deliberate: git writes both so older CLIs can still read the metadata
 		TokenUsage:                  opts.TokenUsage,
 		SkillEvents:                 opts.SkillEvents,
-		PromptAttributions:          opts.PromptAttributionsJSON,
 		SessionMetrics:              opts.SessionMetrics,
 		Summary:                     checkpoint.RedactSummary(opts.Summary),
-		Attribution:                 opts.Attribution,
 		Kind:                        opts.Kind,
 		ReviewSkills:                opts.ReviewSkills,
 		ReviewPrompt:                redact.String(opts.ReviewPrompt),
@@ -460,6 +439,10 @@ func metadataFromWriteOptions(opts cp.WriteOptions) cp.Metadata {
 
 func upsertSession(sessions []storedSession, session storedSession) []storedSession {
 	if idx := sessionIndexByID(sessions, session.SessionID); idx >= 0 {
+		// Keep the opaque line attribution an older CLI recorded for this
+		// session through the overwrite, as the git store does.
+		session.Metadata.LegacyInitialAttribution = sessions[idx].Metadata.LegacyInitialAttribution
+		session.Metadata.LegacyPromptAttributions = sessions[idx].Metadata.LegacyPromptAttributions
 		sessions[idx] = session
 		return sessions
 	}

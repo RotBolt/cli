@@ -64,7 +64,6 @@ func TestCheckpointCommitLinks_Backends(t *testing.T) {
 			require.NoError(t, store.Write(ctx, req), "repeated repair must not duplicate associations")
 			require.Error(t, store.Write(ctx, CheckpointCommitLinks{CheckpointID: cid, Links: []LinkedCommit{{SHA: "bad"}}}))
 			require.NoError(t, store.Write(ctx, write), "session rewrite must preserve root links")
-			require.NoError(t, store.Write(ctx, CheckpointAttribution{CheckpointID: cid, Attribution: &Attribution{AgentLines: 3}}))
 			summary, err := store.Read(ctx, cid)
 			require.NoError(t, err)
 			require.Equal(t, links, summary.LinkedCommits)

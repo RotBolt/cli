@@ -64,9 +64,6 @@ func TestSeam_GitRefsPrimaryWithGitBranchMirror(t *testing.T) {
 	require.NoError(t, stores.Persistent.Write(ctx, SessionSummary{
 		CheckpointID: cid, Summary: &Summary{Intent: "intent-x", Outcome: "outcome-y"},
 	}))
-	require.NoError(t, stores.Persistent.Write(ctx, CheckpointAttribution{
-		CheckpointID: cid, Attribution: &Attribution{AgentLines: 7, AgentPercentage: 70},
-	}))
 
 	require.NoError(t, stores.Persistent.Write(ctx, CheckpointCommitLinks{
 		CheckpointID: cid, Links: []LinkedCommit{{SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
@@ -102,8 +99,6 @@ func assertSeamVariants(t *testing.T, store PersistentStore, cid, reservedCID id
 	require.NoError(t, err)
 	require.NotNil(t, summary, "checkpoint should exist")
 	require.Len(t, summary.Sessions, 1)
-	require.NotNil(t, summary.CombinedAttribution)
-	assert.Equal(t, 7, summary.CombinedAttribution.AgentLines)
 	assert.Equal(t, []LinkedCommit{{SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}, summary.LinkedCommits)
 
 	content, err := store.ReadSessionContent(ctx, cid, 0)

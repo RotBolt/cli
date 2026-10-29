@@ -70,11 +70,6 @@ func TestSeam_GitPrimaryWithFsMirror(t *testing.T) {
 	require.NoError(t, stores.Persistent.Write(ctx, cp.SessionSummary{
 		CheckpointID: cid, Summary: &cp.Summary{Intent: "intent-x", Outcome: "outcome-y"},
 	}))
-	// 5. CheckpointAttribution: set combined attribution.
-	require.NoError(t, stores.Persistent.Write(ctx, cp.CheckpointAttribution{
-		CheckpointID: cid, Attribution: &cp.Attribution{AgentLines: 7, AgentPercentage: 70},
-	}))
-
 	require.NoError(t, stores.Persistent.Write(ctx, cp.CheckpointCommitLinks{
 		CheckpointID: cid, Links: []cp.LinkedCommit{{SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 	}))
@@ -112,10 +107,6 @@ func assertAllVariants(t *testing.T, store cp.PersistentStore, cid, reservedCID 
 	require.NoError(t, err)
 	require.NotNil(t, meta.Summary)
 	assert.Equal(t, "intent-x", meta.Summary.Intent)
-
-	// CheckpointAttribution landed.
-	require.NotNil(t, summary.CombinedAttribution)
-	assert.Equal(t, 7, summary.CombinedAttribution.AgentLines)
 
 	reservedContent, err := store.ReadSessionContent(ctx, reservedCID, 0)
 	require.NoError(t, err)

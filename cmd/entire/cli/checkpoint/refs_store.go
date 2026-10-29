@@ -122,8 +122,6 @@ func (s *gitRefsStore) Write(ctx context.Context, req WriteRequest) error {
 		return s.backfillTranscript(ctx, UpdateOptions(r))
 	case SessionSummary:
 		return s.backfillSummary(ctx, r.CheckpointID, r.Summary)
-	case CheckpointAttribution:
-		return s.backfillAttribution(ctx, r.CheckpointID, r.Attribution)
 	case CheckpointCommitLinks:
 		return s.updateCheckpointSummary(ctx, r.CheckpointID, commitLinksUpdate(r.Links))
 	default:
@@ -321,13 +319,6 @@ func (s *gitRefsStore) backfillSummary(ctx context.Context, checkpointID id.Chec
 			return CreateCommit(ctx, s.repo, checkpointSubtree, parentHash, commitMsg, authorName, authorEmail)
 		},
 	)
-}
-
-func (s *gitRefsStore) backfillAttribution(ctx context.Context, checkpointID id.CheckpointID, combinedAttribution *Attribution) error {
-	return s.updateCheckpointSummary(ctx, checkpointID, func(summary *CheckpointSummary) error {
-		summary.CombinedAttribution = combinedAttribution
-		return nil
-	})
 }
 
 func (s *gitRefsStore) updateCheckpointSummary(ctx context.Context, checkpointID id.CheckpointID, update func(*CheckpointSummary) error) error {
@@ -645,6 +636,7 @@ func HydrateListedCheckpointInfo(ctx context.Context, store interface {
 	out.FilesTouched = summary.FilesTouched
 	out.SessionCount = len(summary.Sessions)
 	out.Imported = summary.Imported
+	out.LinkedCommits = summary.LinkedCommits
 	out.SessionIDs = nil
 	lastMetaOK := len(summary.Sessions) == 0
 	for i := range summary.Sessions {

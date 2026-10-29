@@ -32,14 +32,14 @@ func TestAmendCommitLinks_RealGitHooks(t *testing.T) {
 					require.NoError(t, env.SimulateStop(sess.ID, sess.TranscriptPath))
 				}
 				turn("first", "f1.txt", "one\n")
-				env.GitCommitWithShadowHooks("first", "f1.txt")
+				env.GitCommitWithHooks("first", "f1.txt")
 				first := env.LatestCheckpointID()
 				before := env.RunCLI("checkpoint", "explain", "--checkpoint", first, "--raw-transcript")
 				ids := []string{first}
 				if mode == "new work" || mode == "soft reset fold" {
 					turn("second", "f2.txt", "two\n")
 					if mode == "soft reset fold" {
-						env.GitCommitWithShadowHooks("second", "f2.txt")
+						env.GitCommitWithHooks("second", "f2.txt")
 						ids = append(ids, env.LatestCheckpointID())
 						testutil.RunGit(t, env.RepoDir, "reset", "--soft", "HEAD~1")
 					} else {

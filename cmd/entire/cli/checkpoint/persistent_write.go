@@ -19,8 +19,6 @@ func (s *GitStore) Write(ctx context.Context, req WriteRequest) error {
 		return s.backfillTranscript(ctx, UpdateOptions(r))
 	case SessionSummary:
 		return s.backfillSummary(ctx, r.CheckpointID, r.Summary)
-	case CheckpointAttribution:
-		return s.backfillAttribution(ctx, r.CheckpointID, r.Attribution)
 	case CheckpointCommitLinks:
 		return s.updateCheckpointSummary(ctx, r.CheckpointID, commitLinksUpdate(r.Links))
 	default:

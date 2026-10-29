@@ -44,7 +44,7 @@ Every agent must implement all 19 methods on the `Agent` interface:
 
 | Interface | Methods | When to implement |
 |-----------|---------|-------------------|
-| `HookSupport` | `InstallHooks`, `UninstallHooks`, `AreHooksInstalled`, `GetSupportedHooks` | Agent uses a config file for hook registration (e.g., `settings.json`) |
+| `HookSupport` | `InstallHooks`, `UninstallHooks`, `AreHooksInstalled` | Agent uses a config file for hook registration (e.g., `settings.json`) |
 | `HookHandler` | `GetHookNames` | **Required for CLI hook registration** — `entire hooks <agent> <verb>` subcommands are only created for agents implementing this interface. Typically delegates to `HookNames()`. |
 | `TranscriptAnalyzer` | `GetTranscriptPosition`, `ExtractModifiedFilesFromOffset` | You want richer checkpoints with transcript-derived file lists |
 | `TranscriptPreparer` | `PrepareTranscript` | Agent writes transcripts asynchronously and needs a flush/sync step |
@@ -439,7 +439,6 @@ func (a *YourAgent) InstallHooks(ctx context.Context, force bool) (int, error) {
 
 func (a *YourAgent) UninstallHooks() error         { /* reverse of install */ }
 func (a *YourAgent) AreHooksInstalled() bool        { /* check settings file */ }
-func (a *YourAgent) GetSupportedHooks() []agent.HookType { /* list supported types */ }
 ```
 
 #### Choosing the hook wrapper
@@ -563,11 +562,12 @@ A launch-time `SubagentEnd` needs `ToolUseID`, and should carry `SubagentID` whe
 ### `SubagentSessionResolver`
 
 **What it enables:** Attributing a detached subagent session's turn to the parent
-task invocation, as a task checkpoint under `.entire/metadata/<parent>/tasks/<tool-use-id>/`.
+task invocation, as a task record on the parent session that condensation
+materializes into the parent's checkpoint under `tasks/<tool-use-id>/`.
 
 **Without it:** Turn-end treats the subagent's session as an ordinary top-level
-session and mints a session checkpoint for it — the subagent's files land on the
-shadow branch under a session the user never drove, and no task checkpoint exists.
+session and records a turn end for it — the subagent's files are tracked under a
+session the user never drove, and no task record exists.
 
 **Implement when:** Your agent dispatches subagents as sessions of their own,
 firing a full SessionStart/UserPromptSubmit/Stop cycle for each. Factory AI
